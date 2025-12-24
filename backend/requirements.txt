@@ -17,3 +17,4 @@ aiosqlite==0.19.0
 httpx==0.25.2
 limits==3.9.0
 aioredis==2.0.1
+google-generativeai==0.4.1

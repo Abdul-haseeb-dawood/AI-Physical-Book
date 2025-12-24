@@ -1,6 +1,6 @@
 // Chat API service to connect frontend to backend
 class ChatAPI {
-  constructor(baseURL = '/api') {
+  constructor(baseURL = process.env.REACT_APP_API_BASE_URL ? `${process.env.REACT_APP_API_BASE_URL}/api` : '/api') {
     this.baseURL = baseURL;
   }
 

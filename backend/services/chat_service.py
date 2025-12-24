@@ -10,6 +10,7 @@ from utils.logger import logger
 from utils.analytics import AnalyticsService
 from config.settings import settings
 from openai import OpenAI
+import google.generativeai as genai
 import logging
 
 
@@ -25,7 +26,17 @@ class ChatService:
         self.cache_service = CacheService()
         self.session_service = SessionService()
         self.analytics_service = AnalyticsService()
-        self.client = OpenAI(api_key=settings.GEMINI_API_KEY)
+
+        # Determine which client to use based on available API keys
+        if settings.OPENAI_API_KEY:
+            self.client_type = "openai"
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        elif settings.GEMINI_API_KEY:
+            self.client_type = "gemini"
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            self.client = genai.GenerativeModel(settings.GEMINI_MODEL)
+        else:
+            raise ValueError("Either OPENAI_API_KEY or GEMINI_API_KEY must be set")
 
     def process_query(self, query: str, query_context: QueryContext, ip_address: str = None) -> Dict[str, Any]:
         """
@@ -125,31 +136,50 @@ class ChatService:
             # Sanitize query for context inclusion
             safe_query = self.security_service.sanitize_query_for_context(sanitized_query)
 
-            # Create the message for the LLM
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"You are an AI assistant for the 'Physical AI & Humanoid Robotics' book. "
-                               f"Answer questions based ONLY on the provided book content. "
-                               f"If the answer is not in the provided context, clearly state that you couldn't find the information. "
-                               f"Be helpful and concise, and reference the book content when possible."
-                },
-                {
-                    "role": "user",
-                    "content": f"Context from the book:\n{context}\n\nQuestion: {safe_query}"
-                }
-            ]
+            # Prepare the prompt for the LLM
+            system_prompt = f"You are an AI assistant for the 'Physical AI & Humanoid Robotics' book. " \
+                           f"Answer questions based ONLY on the provided book content. " \
+                           f"If the answer is not in the provided context, clearly state that you couldn't find the information. " \
+                           f"Be helpful and concise, and reference the book content when possible."
 
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=settings.GPT_MODEL,
-                messages=messages,
-                temperature=0.3,  # Lower temperature for more consistent answers
-                max_tokens=500
-            )
+            user_prompt = f"Context from the book:\n{context}\n\nQuestion: {safe_query}"
 
-            # Extract the response
-            llm_response = response.choices[0].message.content
+            # Call the appropriate API based on the client type
+            if self.client_type == "openai":
+                messages = [
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": user_prompt
+                    }
+                ]
+
+                response = self.client.chat.completions.create(
+                    model=settings.GPT_MODEL,
+                    messages=messages,
+                    temperature=0.3,  # Lower temperature for more consistent answers
+                    max_tokens=500
+                )
+
+                # Extract the response
+                llm_response = response.choices[0].message.content
+            elif self.client_type == "gemini":
+                # For Gemini, combine system and user prompts
+                full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+                response = self.client.generate_content(
+                    full_prompt,
+                    generation_config={
+                        "temperature": 0.3,
+                        "max_output_tokens": 500
+                    }
+                )
+
+                # Extract the response
+                llm_response = response.text
 
             # Calculate a basic confidence score based on how much context was used
             confidence = min(len(search_results) / 10.0, 1.0)  # Scale based on number of results, max 1.0

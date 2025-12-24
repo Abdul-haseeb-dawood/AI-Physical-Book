@@ -10,7 +10,7 @@ from middleware.rate_limit import rate_limit_middleware
 from config.settings import settings
 
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(tags=["chat"])
 
 # Request models
 class ChatRequest(BaseModel):

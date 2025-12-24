@@ -30,8 +30,6 @@ def create_app():
 
     return app
 
-
-# Create the main FastAPI application
 app = create_app()
 
 

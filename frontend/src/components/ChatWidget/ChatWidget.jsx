@@ -42,8 +42,11 @@ const ChatWidget = () => {
         chapter: document.querySelector('h1')?.textContent || 'Unknown Chapter',
       };
 
+      // Get API base URL from environment or default to /api
+      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || '';
+
       // Call backend API
-      const response = await fetch('/api/chat', {
+      const response = await fetch(`http://localhost:8000/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

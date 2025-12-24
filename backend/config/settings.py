@@ -4,7 +4,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # OpenAI settings
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-pro")  # Default Gemini model
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
     GPT_MODEL: str = os.getenv("GPT_MODEL", "gpt-3.5-turbo")
 
