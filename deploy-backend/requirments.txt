@@ -1,7 +1,0 @@
-requests
-beautifulsoup4
-cohere
-qdrant-client
-python-dotenv
-fastapi
-uvicorn
