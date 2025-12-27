@@ -1,42 +1,141 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from api.chat_routes import router as chat_router
-from config.settings import settings
-import uvicorn
+import requests
+import xml.etree.ElementTree as ET
+import trafilatura
+from qdrant_client import QdrantClient
+from qdrant_client.models import VectorParams, Distance, PointStruct
+import cohere
+
+# -------------------------------------
+# CONFIG
+# -------------------------------------
+SITEMAP_URL = "https://Abdul-haseeb-dawood.github.io/Physical-AI-Book/sitemap.xml"
+COLLECTION_NAME = "physical-ai-book"
+
+# Cohere API
+cohere_client = cohere.Client("lIktbQOgIJ8VjIysFxkM9Bv8AnArRjmh37JdfjEK")
+EMBED_MODEL = "embed-english-v3.0"
+
+# Qdrant Cloud
+qdrant = QdrantClient(
+    url="https://2134dfd0-9e1d-4561-9378-a3b7eecdd74d.europe-west3-0.gcp.cloud.qdrant.io",
+    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwiZXhwIjoxNzc0NjAwMzQ0fQ.hl0p5I85HIFGqC0JZ0BBhu4KSGN0fqpNxrsgBbQkN8k" 
+)
+def get_all_urls(sitemap_url):
+    xml = requests.get(sitemap_url).text
+    root = ET.fromstring(xml)
+
+    urls = []
+    for child in root:
+        loc_tag = child.find("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+        if loc_tag is not None:
+            urls.append(loc_tag.text)
+
+    print("\nFOUND URLS:")
+    for u in urls:
+        print(" -", u)
+
+    return urls
 
 
-def create_app():
-    app = FastAPI(
-        title="RAG Chatbot API",
-        description="API for the RAG chatbot system that answers questions based on book content",
-        version="1.0.0"
+# -------------------------------------
+# Step 2 — Download page + extract text
+# -------------------------------------
+def extract_text_from_url(url):
+    html = requests.get(url).text
+    text = trafilatura.extract(html)
+
+    if not text:
+        print("[WARNING] No text extracted from:", url)
+
+    return text
+
+
+# -------------------------------------
+# Step 3 — Chunk the text
+# -------------------------------------
+def chunk_text(text, max_chars=12000):
+    chunks = []
+    while len(text) > max_chars:
+        split_pos = text[:max_chars].rfind(". ")
+        if split_pos == -1:
+            split_pos = max_chars
+        chunks.append(text[:split_pos])
+        text = text[split_pos:]
+    chunks.append(text)
+    return chunks
+
+
+# -------------------------------------
+# Step 4 — Create embedding
+# -------------------------------------
+def embed(text):
+    response = cohere_client.embed(
+        model=EMBED_MODEL,
+        input_type="search_query",  # Use search_query for queries
+        texts=[text],
+    )
+    return response.embeddings[0]  # Return the first embedding
+
+
+# -------------------------------------
+# Step 5 — Store in Qdrant
+# -------------------------------------
+def create_collection():
+    print("\nCreating Qdrant collection...")
+    qdrant.recreate_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(
+        size=1024,        # Cohere embed-english-v3.0 dimension
+        distance=Distance.COSINE
+        )
     )
 
-    # Add CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # In production, specify your frontend domain
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+def save_chunk_to_qdrant(chunk, chunk_id, url):
+    vector = embed(chunk)
+
+    qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[
+            PointStruct(
+                id=chunk_id,
+                vector=vector,
+                payload={
+                    "url": url,
+                    "text": chunk,
+                    "chunk_id": chunk_id
+                }
+            )
+        ]
     )
 
-    # Include API routes
-    app.include_router(chat_router)
 
-    @app.get("/health")
-    async def health_check():
-        return {"status": "healthy"}
+# -------------------------------------
+# MAIN INGESTION PIPELINE
+# -------------------------------------
+def ingest_book():
+    urls = get_all_urls(SITEMAP_URL)
 
-    return app
+    create_collection()
 
-app = create_app()
+    global_id = 1
+
+    for url in urls:
+        print("\nProcessing:", url)
+        text = extract_text_from_url(url)
+
+        if not text:
+            continue
+
+        chunks = chunk_text(text)
+
+        for ch in chunks:
+            save_chunk_to_qdrant(ch, global_id, url)
+            print(f"Saved chunk {global_id}")
+            global_id += 1
+
+    print("\n✔️ Ingestion completed!")
+    print("Total chunks stored:", global_id - 1)
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    ingest_book()
